@@ -6,7 +6,31 @@
  * var mod = require('CreepManager'); // -> 'a thing'
  */
  
- var debug =false;
+ 
+ Creep.prototype.can = function(part) {
+    profiler.openProfile("CAN")
+    if(typeof this.memory.capacity === "undefined"){
+         this.memory.capacity = {
+             MOVE:0,
+             WORK:0,
+             CARRY:0,
+             ATTACK:0,
+             RANGED_ATTACK:0,
+             HEAL:0,
+             TOUGH:0
+         }
+        for(var i in this.body){
+            this.memory.capacity[ this.body[i].type ] = 1;
+    
+        }
+    
+    }
+    profiler.closeProfile("CAN")
+    return this.memory.capacity[part];
+};
+
+ 
+ var debug =true;
  
  var profiler = require("Profiler");
  
@@ -124,6 +148,9 @@ function routeCreep(creep,dest) {
         Memory.routeCache[locStr]['dests'][dest.id] = {1:0,2:0,3:0,4:0,5:0,6:0,7:0,8:0};
         profiler.openProfile("routing_building_path")
         path = creep.room.findPath(creep.pos,dest.pos,{maxOps:500,heuristicWeight:2})
+        if(typeof path[0] !== "undefined"){
+            
+        
         profiler.closeProfile("routing_building_path")
         Memory.routeCache[locStr]['dests'][''+dest.id][path[0].direction]+=1;
 
@@ -140,7 +167,25 @@ function routeCreep(creep,dest) {
             Memory.routeCache[stepStr]['dests'][''+dest.id][path[i+1].direction]+=1;
 
         }
+        }
+        else{
+            
+            dir = Math.floor(Math.random()*8);
+    
+    
+            var error = creep.move(dir);
+            return error;
+    
+        }
     }
+    
+    for(var k in Memory.routeCache[locStr]['dests']){
+        if(Game.getObjectById(k)==null){
+            delete  Memory.routeCache[locStr]['dests'][k];
+            //console.log("Pruned",k)
+        }
+    }
+    
     
     profiler.openProfile("routing_building_random_walk")
     var total = 0.0
@@ -190,7 +235,7 @@ function routeCreep(creep,dest) {
                 ////console.log(creep,"walking to source");
                 
                 var candiates = creep.room.find(FIND_SOURCES_ACTIVE);
-                creep.memory.sourceid = creep.memory.sourceid || min(candiates,function(c){return  c.getAssigned()}).id;
+                creep.memory.sourceid =  creep.memory.sourceid || min(candiates,function(c){return  c.getAssigned()}).id;
                 var source = Game.getObjectById(creep.memory.sourceid)
                 source.assign();
                 
@@ -198,6 +243,7 @@ function routeCreep(creep,dest) {
                 
                 
                     creep.harvest(source);
+                    creep.dropEnergy(creep.carry.energy)
                 
                 
            
@@ -205,7 +251,7 @@ function routeCreep(creep,dest) {
         
      },
      'deposit': function(creep){
-        if(creep.room.energyAvailable/creep.room.energyCapacityAvailable < .8 ){// structureType: STRUCTURE_EXTENSION },{ structureType: STRUCTURE_SPAWN }]
+        if(creep.room.energyAvailable/creep.room.energyCapacityAvailable < 1.0 ){// structureType: STRUCTURE_EXTENSION },{ structureType: STRUCTURE_SPAWN }]
             profiler.openProfile("deposit_extensions")
             profiler.openProfile("deposit_extensions_find")
             var buildflags = creep.room.find(FIND_FLAGS, { filter: function(n) {return n.color == COLOR_WHITE}});
@@ -244,32 +290,61 @@ function routeCreep(creep,dest) {
            }
            profiler.closeProfile("deposit_extensions")
         }
-        else{
-            profiler.openProfile("deposit_controller")
-            if(creep.room.controller) {
-             home = creep.room.controller
-             routeCreep(creep,creep.room.controller);
-              creep.upgradeController(creep.room.controller);
-              creep.memory.refill_dampener = 0.1
-                var peers = creep.room.find(FIND_MY_CREEPS).filter(function(creep2) { return creep.pos.isNearTo(creep2.pos) && creep2.my })
-                var best = min(peers,function(c){return (c.pos.x-home.pos.x)*(c.pos.x-home.pos.x)+(c.pos.y-home.pos.y)*(c.pos.y-home.pos.y);});
-                //////console.log(best)
-                creep.transferEnergy(best)
-            } 
-            profiler.closeProfile("deposit_controller")
-        }
+       
         
         
 
      },
      'build':function(creep){
          var sites = creep.room.find(FIND_CONSTRUCTION_SITES);
+         if(sites.length){
          var best = min(sites,function(c){return (c.pos.x-creep.pos.x)*(c.pos.x-creep.pos.x)+(c.pos.y-creep.pos.y)*(c.pos.y-creep.pos.y)})
          routeCreep(creep,best)
         creep.build(best);
         var peers = creep.room.find(FIND_MY_CREEPS).filter(function(creep2) { return creep.pos.isNearTo(creep2.pos) && creep2.my });
         var best = min(peers,function(c){return (c.pos.x-best.pos.x)*(c.pos.x-best.pos.x)+(c.pos.y-best.pos.y)*(c.pos.y-best.pos.y)});
         creep.transferEnergy(best);
+         }
+         else
+         {
+             sites = creep.room.find(FIND_STRUCTURES);
+             var target = min(sites,function(s){
+                 if(s.structureType==STRUCTURE_CONTROLLER){
+                    return 0.00000001*s.pos.getRangeTo(creep)
+                 }
+                 else{
+                 return ((s.hits+1)/s.hitsMax)*s.pos.getRangeTo(creep)
+                 }
+                 });
+                
+             //console.log(target)
+             routeCreep(creep,target);
+             if(target.structureType==STRUCTURE_CONTROLLER){
+                 creep.upgradeController(target)
+             }
+             else{
+             creep.repair(target);
+             }
+
+                var peers = creep.room.find(FIND_MY_CREEPS).filter(function(creep2) { return creep.pos.isNearTo(creep2.pos) && creep2.my })
+                var best = min(peers,function(c){return (c.pos.x-target.pos.x)*(c.pos.x-target.pos.x)+(c.pos.y-target.pos.y)*(c.pos.y-target.pos.y);});
+                //////console.log(best)
+                creep.transferEnergy(best)
+             
+         }
+         /*
+          else{
+            profiler.openProfile("deposit_controller")
+            if(creep.room.controller) {
+             home = creep.room.controller
+             routeCreep(creep,creep.room.controller);
+              creep.upgradeController(creep.room.controller);
+              creep.memory.refill_dampener = 0.1
+
+            } 
+            profiler.closeProfile("deposit_controller")
+            
+        }*/
          
      },
      'defend':function(creep){
@@ -278,7 +353,7 @@ function routeCreep(creep,dest) {
          creep.attack(target);
      },
      'getEnergy':function(creep){
-         var target = creep.room.find(FIND_DROPPED_ENERGY).filter(function(buildsite) { return creep.pos.isNearTo(buildsite.pos) })[0];
+         var target = min(creep.room.find(FIND_DROPPED_ENERGY),function(c){return c.energy;});
          routeCreep(creep,target)
          creep.pickup(target);
      }
@@ -290,7 +365,7 @@ function routeCreep(creep,dest) {
  var Fitnesses = {
      'gather': function(creep){
          
-         var tmp =( 0.95+0.1*Math.random())*(1.0 - creep.carry.energy/ creep.carryCapacity);
+         var tmp =0.5*creep.can(WORK)*creep.can(MOVE);
          //console.log("gather",tmp);
          return tmp;////min(candiates,function(c){return  creep.room.findPath(creep.pos,c.pos).length;}).length;
      },
@@ -304,16 +379,20 @@ function routeCreep(creep,dest) {
              return -1
          }
          //console.log("gather",tmp);
-         return tmp;////min(candiates,function(c){return  creep.room.findPath(creep.pos,c.pos).length;}).length;
+         return tmp*creep.can(CARRY)*creep.can(MOVE);////min(candiates,function(c){return  creep.room.findPath(creep.pos,c.pos).length;}).length;
      },
      'build': function(creep){
+         
          var escore = creep.carry.energy/creep.carryCapacity;
          ////console.log(escore*bscore);
-         if(escore > 0.8 && Math.random()<0.1 && creep.room.find(FIND_CONSTRUCTION_SITES).length > 0){
+         if(escore>0.9 && creep.can(WORK)*creep.can(CARRY)*creep.can(MOVE)==1){
              return 100.0;
          }
+         else if(escore>0) {
+             return 0.0;
+         }
          else{
-             return -10.0;
+             return -50
          }
      },
      'getEnergy': function(creep){
@@ -321,10 +400,10 @@ function routeCreep(creep,dest) {
          if(creep.carry.energy < creep.carryCapacity){
              escore=1.0;
          }
-         var bscore = creep.room.find(FIND_DROPPED_ENERGY).filter(function(energy) { return creep.pos.isNearTo(energy.pos) }).length;
+         
          ////console.log(escore*bscore);
          //console.log("energy",escore,bscore,escore*bscore);
-         return escore*bscore*10;
+         return creep.can(CARRY);
      },
      'defend': function(creep){
          var bogies = creep.room.find(FIND_HOSTILE_CREEPS)
@@ -332,7 +411,7 @@ function routeCreep(creep,dest) {
          
          //var val =  sum( dists )
          
-         return -10//(bogies.length )*10;
+         return (bogies.length )*10*creep.can(ATTACK)+(bogies.length )*10*creep.can(RANGED_ATTACK);
      }
  }
  
@@ -365,12 +444,8 @@ function routeCreep(creep,dest) {
   var peers =  thisCreep.room.find(FIND_MY_CREEPS).filter(function(p) { return thisCreep.pos.isNearTo(p.pos) });
   map(Object.keys(Fitnesses),function(f){
       
-      var peersum = 0;
-      for(var i in peers){
-          var p = peers[i];
-          peersum= peersum + p.memory.fitnesses[f] || peersum
-      }
-      thisCreep.memory.fitnesses[f] = 0.0*peersum/peers.length + newfitnesses[f]*0.3 + thisCreep.memory.fitnesses[f]*0.7 || newfitnesses[f];
+      
+      thisCreep.memory.fitnesses[f] = newfitnesses[f]*0.3 + thisCreep.memory.fitnesses[f]*0.7 || newfitnesses[f];
       
   })
   

@@ -10,12 +10,14 @@
  var Profiles_start = {}
  var Profiles_total = {}
  
+ var profiler_enabled = false;
+ 
  function openProfile(profileID){
      if(typeof Profiles_open[profileID] === "undefined" ){
          Profiles_open[profileID] = 0;
      }
      if(Profiles_open[profileID] == 0){
-         Profiles_start[profileID] = Game.getUsedCpu();
+         Profiles_start[profileID] = new Date();
      }
      
      Profiles_open[profileID] += 1;
@@ -28,7 +30,7 @@
          Profiles_total[profileID] = 0.0;
      }
       if(Profiles_open[profileID] == 0){
-         Profiles_total[profileID] += Game.getUsedCpu()-Profiles_start[profileID];
+         Profiles_total[profileID] +=new Date() -Profiles_start[profileID];
      }
  }
  
@@ -38,6 +40,17 @@
      }
  }
  
+ 
+ if(profiler_enabled){
  module.exports.openProfile = openProfile;
  module.exports.closeProfile = closeProfile;
  module.exports.showProfiles = showProfiles;
+ }
+ else{
+     var devnull = function(n){};
+     module.exports.openProfile = devnull;
+    module.exports.closeProfile = devnull;
+    module.exports.showProfiles = devnull;
+     
+     
+ }
